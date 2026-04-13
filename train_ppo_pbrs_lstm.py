@@ -14,7 +14,7 @@ from collections import deque
 ACTIONS = ["L45", "L22", "FW", "R22", "R45"]
 
 
-class SequenceWrapper:
+class Lstm_Pbrs_Wrapper:
     def __init__(self, env, k=4, gamma=0.999):
         self.env = env
         self.k = k
@@ -57,9 +57,7 @@ class SequenceWrapper:
         return np.stack(list(self.frames), axis=0)
 
 
-# ==========================================
 # 1. Neural Networks (LSTM)
-# ==========================================
 class ValueNetwork(nn.Module):
     def __init__(self, stateDim, hiddenDims, activation):
         super(ValueNetwork, self).__init__()
@@ -157,9 +155,7 @@ class PolicyNetwork(nn.Module):
         return action
 
 
-# ==========================================
 # 2. Single-Worker rBuffer
-# ==========================================
 class rBuffer:
     def __init__(self, buffer_size, seq_len, feature_dim):
         self.states = np.zeros((buffer_size, seq_len, feature_dim), dtype=np.float32)
@@ -205,9 +201,7 @@ class rBuffer:
         self.ptr = 0
 
 
-# ==========================================
 # 3. PPO Agent
-# ==========================================
 class PPO:
     def __init__(self, env, args, activation=F.relu):
         self.env = env
@@ -219,13 +213,13 @@ class PPO:
         torch.manual_seed(args.seed)
 
         self.actionDim = 5
-        self.featureDim = 18  # 18 features per frame for the LSTM
+        self.stateDim = 18
         self.seqLen = args.num_frames
 
         self.pNetwork = PolicyNetwork(
-            self.featureDim, self.actionDim, args.hDim_p, activation
+            self.stateDim, self.actionDim, args.hDim_p, activation
         ).to(self.device)
-        self.vNetwork = ValueNetwork(self.featureDim, args.hDim_v, activation).to(
+        self.vNetwork = ValueNetwork(self.stateDim, args.hDim_v, activation).to(
             self.device
         )
 
@@ -241,7 +235,7 @@ class PPO:
         self.policyOptimizer = optim.Adam(self.pNetwork.parameters(), lr=args.policyLR)
         self.valueOptimizer = optim.Adam(self.vNetwork.parameters(), lr=args.valueLR)
 
-        self.rbuffer = rBuffer(args.steps_per_epoch, self.seqLen, self.featureDim)
+        self.rbuffer = rBuffer(args.steps_per_epoch, self.seqLen, self.stateDim)
 
         self.trainRewardsList = []
         self.timeStepEpisode = []
@@ -466,7 +460,7 @@ def main():
         box_speed=args.box_speed,
     )
 
-    env = SequenceWrapper(base_env, k=args.num_frames, gamma=args.gamma)
+    env = Lstm_Pbrs_Wrapper(base_env, k=args.num_frames, gamma=args.gamma)
 
     agent = PPO(env, args)
 
