@@ -31,26 +31,9 @@ class SequenceWrapper:
         scaling_factor = 0.1
         radar_range = 30 * self.env.scaling_factor  # 150 pixels for scaling_factor=5
 
-        if self.env.enable_push:
-            max_x = self.env.frame_size[1] - 10
-            max_y = self.env.frame_size[0] - 10
-            min_x = 10
-            min_y = 10
-
-            dist_to_left = box_x - min_x
-            dist_to_right = max_x - box_x
-            dist_to_top = box_y - min_y
-            dist_to_bottom = max_y - box_y
-
-            distance_to_nearest_boundary = min(
-                dist_to_left, dist_to_right, dist_to_top, dist_to_bottom
-            )
-            return -distance_to_nearest_boundary * scaling_factor
-
-        else:
-            distance_to_box = np.sqrt((bot_x - box_x) ** 2 + (bot_y - box_y) ** 2)
-            effective_distance = min(distance_to_box, radar_range)
-            return -effective_distance * scaling_factor
+        distance_to_box = np.sqrt((bot_x - box_x) ** 2 + (bot_y - box_y) ** 2)
+        effective_distance = min(distance_to_box, radar_range)
+        return -effective_distance * scaling_factor
 
     def reset(self, **kwargs):
         obs = self.env.reset(**kwargs)
