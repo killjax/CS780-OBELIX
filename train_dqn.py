@@ -20,7 +20,7 @@ from value_buffer import ReplayBuffer
 ACTIONS = ["L45", "L22", "FW", "R22", "R45"]
 
 
-class DDQN:
+class DQN:
     def __init__(
         self,
         env,
@@ -89,7 +89,7 @@ class DDQN:
 
         self.rBuffer = ReplayBuffer(
             bufferSize=self.bufferSize,
-            bufferType="DDQN",
+            bufferType="DQN",
             epsilon=kwargs.get("epsilon", 0.5),
             temp=kwargs.get("temp", 0.1),
             initial_epsilon_value=kwargs.get("initial_epsilon_value", 1.0),
@@ -101,7 +101,7 @@ class DDQN:
         self.render = kwargs.get("render", False)
 
 
-class DDQN(DDQN):
+class DQN(DQN):
     def initBookKeeping(self):
         # this method creates and intializes all the variables required for book-keeping values and it is called
         # init method
@@ -112,8 +112,8 @@ class DDQN(DDQN):
         self.timeStepEpisode = np.zeros(self.MAX_TRAIN_EPISODES, dtype=int).tolist()
 
 
-class DDQN(DDQN):
-    def runDDQN(self):
+class DQN(DQN):
+    def runDQN(self):
         # this is the main method, it trains the agent
 
         self.initBookKeeping()
@@ -131,7 +131,7 @@ class DDQN(DDQN):
         )
 
 
-class DDQN(DDQN):
+class DQN(DQN):
     def trainAgent(self):
         # this method collects experiences and trains the NFQ agent and does BookKeeping while training.
         # this calls the trainNetwork() method internally, it also evaluates the agent per episode
@@ -170,7 +170,7 @@ class DDQN(DDQN):
         )
 
 
-class DDQN(DDQN):
+class DQN(DQN):
     def trainNetwork(self, experiences, epochs):
         # this method trains the value network epoch number of times and is called by the trainAgent function
         # it essentially uses the experiences to calculate target, using the targets it calculates the error, which
@@ -196,9 +196,7 @@ class DDQN(DDQN):
 
         for _ in range(epochs):
             with torch.no_grad():
-                argmax_a_qs = self.nnTarget.forward(sNexts).argmax(dim=1, keepdim=True)
-                qs = self.nnTarget(sNexts)
-                max_a_qs = qs.gather(1, argmax_a_qs)
+                max_a_qs = self.nnTarget.forward(sNexts).max(dim=1)[0].unsqueeze(1)
                 tdTargets = rs + self.gamma * max_a_qs * (1 - dones)
             qs = self.nnOnline.forward(ss).gather(1, a_s)
             loss = F.mse_loss(qs, tdTargets)
@@ -207,7 +205,7 @@ class DDQN(DDQN):
             self.optimizer.step()
 
 
-class DDQN(DDQN):
+class DQN(DQN):
     def updateNetwork(self, onlineNet, targetNet):
         # this function updates the onlineNetwork with the target network
         #
@@ -216,7 +214,7 @@ class DDQN(DDQN):
         targetNet.load_state_dict(onlineNet.state_dict())
 
 
-class DDQN(DDQN):
+class DQN(DQN):
     def evaluateAgent(self):
         # this function evaluates the agent using the value network, it evaluates agent for MAX_EVAL_EPISODES
         # typcially MAX_EVAL_EPISODES = 1
@@ -238,7 +236,7 @@ class DDQN(DDQN):
         return finalEvalRewardsList
 
 
-class DDQN(DDQN):
+class DQN(DQN):
     def save_weights(self, label):
         torch.save(self.nnOnline.state_dict(), label)
         print(f"weights-table saved to {label}")
@@ -261,7 +259,7 @@ def main():
     }
     ap = argparse.ArgumentParser()
     ap.add_argument("--obelix_py", type=str, required=True)
-    ap.add_argument("--out", type=str, default="weights_Ddqn.pth")
+    ap.add_argument("--out", type=str, default="weights_dqn.pth")
     ap.add_argument("--episodes", type=int, default=5000)
     ap.add_argument("--max_steps", type=int, default=1000)
     ap.add_argument("--difficulty", type=int, default=0)
@@ -310,7 +308,7 @@ def main():
         difficulty=args.difficulty,
         box_speed=args.box_speed,
     )
-    agent = DDQN(
+    agent = DQN(
         env,
         args.seed,
         args.gamma,
@@ -332,7 +330,7 @@ def main():
         warmup_time_steps=args.warmup_time_steps,
         render=args.render,
     )
-    trainRewardsList, finalEvalReward, totalSteps = agent.runDDQN()
+    trainRewardsList, finalEvalReward, totalSteps = agent.runDQN()
 
     print(f"OBELIX Final Eval Reward: {finalEvalReward}")
 

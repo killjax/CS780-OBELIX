@@ -1,66 +1,44 @@
 import os
+from typing import Sequence
 import numpy as np
 
-ACTIONS = ("L45", "L22", "FW", "R22", "R45")
-
-_MODEL = None
+# All possible actions
+ACTIONS: Sequence[str] = ("L45", "L22", "FW", "R22", "R45")
 _LAST_ACTION = None
 _REPEAT_COUNT = 0
+Q_TABLE = None
 
 _MAX_REPEAT = 2
 _CLOSE_Q_DELTA = 0.05
 
 
 def _load_once():
-    """Load the trained model and weights."""
-    global _MODEL
-    if _MODEL is not None:
+    global Q_TABLE
+    if Q_TABLE is not None:
         return
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(current_dir, "q_table1.npy")
 
-    submission_dir = os.path.dirname(__file__)
-    wpath = os.path.join(submission_dir, "weights.pth")
-
-    import torch
-    import torch.nn as nn
-
-    class Net(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.net = nn.Sequential(
-                nn.Linear(18, 64),
-                nn.ReLU(),
-                nn.Linear(64, 64),
-                nn.ReLU(),
-                nn.Linear(64, 5),
-            )
-
-        def forward(self, x):
-            return self.net(x)
-
-    model = Net()
-
-    # Load weights safely
-    sd = torch.load(wpath, map_location="cpu")
-    if isinstance(sd, dict) and "state_dict" in sd:
-        sd = sd["state_dict"]
-
-    model.load_state_dict(sd, strict=True)
-    model.eval()
-
-    _MODEL = model
+    Q_TABLE = np.load(file_path)
 
 
 def policy(obs: np.ndarray, rng: np.random.Generator) -> str:
-    """Use the trained model to choose the best action with smoothing."""
     global _LAST_ACTION, _REPEAT_COUNT
+
     _load_once()
 
-    import torch
+    base3_val = 0
+    for i in range(8):
+        far_bit = obs[2 * i]
+        near_bit = obs[2 * i + 1]
+        val = 2 if near_bit else (1 if far_bit else 0)
+        base3_val += val * (3**i)
 
-    x = torch.from_numpy(obs.astype(np.float32)).unsqueeze(0)
+    ir_bit = obs[16]
+    stuck_bit = obs[17]
+    s = int(base3_val + (ir_bit * 6561) + (stuck_bit * 13122))
 
-    with torch.no_grad():
-        q = _MODEL(x).squeeze(0).numpy()
+    q = Q_TABLE[s]
 
     best = int(np.argmax(q))
 
@@ -68,7 +46,10 @@ def policy(obs: np.ndarray, rng: np.random.Generator) -> str:
     if _LAST_ACTION is not None:
         order = np.argsort(-q)
         best_q, second_q = float(q[order[0]]), float(q[order[1]])
-        if (best_q - second_q) < _CLOSE_Q_DELTA:
+        if (best_q - second_q) < _CLOSE_Q_DELTA and _LAST_ACTION in (
+            order[0],
+            order[1],
+        ):
             if _REPEAT_COUNT < _MAX_REPEAT:
                 best = _LAST_ACTION
                 _REPEAT_COUNT += 1

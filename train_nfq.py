@@ -20,12 +20,13 @@ from value_buffer import ReplayBuffer
 ACTIONS = ["L45", "L22", "FW", "R22", "R45"]
 
 
-class DDQN:
+class NFQ:
     def __init__(
         self,
         env,
         seed,
         gamma,
+        epochs,
         bufferSize,
         batchSize,
         optimizerFn,
@@ -34,7 +35,6 @@ class DDQN:
         MAX_EVAL_EPISODES,
         explorationStrategyTrainFn,
         explorationStrategyEvalFn,
-        updateFrequency,
         **kwargs,
     ):
         # this NFQ method
@@ -53,9 +53,9 @@ class DDQN:
         torch.manual_seed(self.seed)
         self.env = env
         self.gamma = gamma
+        self.epochs = epochs
         self.MAX_TRAIN_EPISODES = MAX_TRAIN_EPISODES
         self.MAX_EVAL_EPISODES = MAX_EVAL_EPISODES
-        self.updateFrequency = updateFrequency
         self.bufferSize = bufferSize
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(self.device)
@@ -71,10 +71,6 @@ class DDQN:
         ).to(self.device)
         if kwargs.get("std_init", True):
             self.nnOnline.apply(init_weights)
-        self.nnTarget = createValueNetwork(
-            self.inDim, self.outDim, hDim=self.hDim, activation=self.activation
-        ).to(self.device)
-        self.nnTarget.load_state_dict(self.nnOnline.state_dict())
 
         self.optimizerFn = optimizerFn
         self.optimizerLR = optimizerLR
@@ -89,7 +85,7 @@ class DDQN:
 
         self.rBuffer = ReplayBuffer(
             bufferSize=self.bufferSize,
-            bufferType="DDQN",
+            bufferType="NFQ",
             epsilon=kwargs.get("epsilon", 0.5),
             temp=kwargs.get("temp", 0.1),
             initial_epsilon_value=kwargs.get("initial_epsilon_value", 1.0),
@@ -98,10 +94,9 @@ class DDQN:
             decay_rate=kwargs.get("decay_rate", 0.99992),
             warmup_time_steps=kwargs.get("warmup_time_steps", 500),
         )
-        self.render = kwargs.get("render", False)
 
 
-class DDQN(DDQN):
+class NFQ(NFQ):
     def initBookKeeping(self):
         # this method creates and intializes all the variables required for book-keeping values and it is called
         # init method
@@ -112,8 +107,8 @@ class DDQN(DDQN):
         self.timeStepEpisode = np.zeros(self.MAX_TRAIN_EPISODES, dtype=int).tolist()
 
 
-class DDQN(DDQN):
-    def runDDQN(self):
+class NFQ(NFQ):
+    def runNFQ(self):
         # this is the main method, it trains the agent
 
         self.initBookKeeping()
@@ -131,7 +126,7 @@ class DDQN(DDQN):
         )
 
 
-class DDQN(DDQN):
+class NFQ(NFQ):
     def trainAgent(self):
         # this method collects experiences and trains the NFQ agent and does BookKeeping while training.
         # this calls the trainNetwork() method internally, it also evaluates the agent per episode
@@ -139,30 +134,25 @@ class DDQN(DDQN):
 
         # Your code goes in here
 
-        self.updateNetwork(self.nnOnline, self.nnTarget)
         s = self.env.reset(seed=self.seed)
         total_time_steps = 0
         for e in tqdm.tqdm(range(self.MAX_TRAIN_EPISODES), desc="Training Episodes"):
             if e > 0:
                 s = self.env.reset()
-            done = False
-            while not done:
-                s, time_steps, total_reward, done = self.rBuffer.collectExperiences(
-                    self.env,
-                    s,
-                    self.explorationStrategyTrainFn,
-                    1,
-                    net=self.nnOnline,
-                    render=self.render,
-                )
-                if self.rBuffer.length() >= self.batchSize:
-                    experiences = self.rBuffer.sample(self.batchSize)
-                    self.trainNetwork(experiences, 1)
-                self.timeStepEpisode[e] += time_steps
-                total_time_steps += time_steps
-                self.trainRewardsList[e] += total_reward
-                if total_time_steps % self.updateFrequency == 0:
-                    self.updateNetwork(self.nnOnline, self.nnTarget)
+
+            s, time_steps, total_reward, _ = self.rBuffer.collectExperiences(
+                self.env,
+                s,
+                self.explorationStrategyTrainFn,
+                self.bufferSize,
+                net=self.nnOnline,
+            )
+            if self.rBuffer.length() >= self.batchSize:
+                experiences = self.rBuffer.sample(self.batchSize)
+                self.trainNetwork(experiences, self.epochs)
+            self.timeStepEpisode[e] += time_steps
+            total_time_steps += time_steps
+            self.trainRewardsList[e] += total_reward
 
         return (
             self.trainRewardsList,
@@ -170,7 +160,7 @@ class DDQN(DDQN):
         )
 
 
-class DDQN(DDQN):
+class NFQ(NFQ):
     def trainNetwork(self, experiences, epochs):
         # this method trains the value network epoch number of times and is called by the trainAgent function
         # it essentially uses the experiences to calculate target, using the targets it calculates the error, which
@@ -196,9 +186,7 @@ class DDQN(DDQN):
 
         for _ in range(epochs):
             with torch.no_grad():
-                argmax_a_qs = self.nnTarget.forward(sNexts).argmax(dim=1, keepdim=True)
-                qs = self.nnTarget(sNexts)
-                max_a_qs = qs.gather(1, argmax_a_qs)
+                max_a_qs = self.nnOnline.forward(sNexts).max(dim=1)[0].unsqueeze(1)
                 tdTargets = rs + self.gamma * max_a_qs * (1 - dones)
             qs = self.nnOnline.forward(ss).gather(1, a_s)
             loss = F.mse_loss(qs, tdTargets)
@@ -207,16 +195,7 @@ class DDQN(DDQN):
             self.optimizer.step()
 
 
-class DDQN(DDQN):
-    def updateNetwork(self, onlineNet, targetNet):
-        # this function updates the onlineNetwork with the target network
-        #
-        # Your code goes in here
-        #
-        targetNet.load_state_dict(onlineNet.state_dict())
-
-
-class DDQN(DDQN):
+class NFQ(NFQ):
     def evaluateAgent(self):
         # this function evaluates the agent using the value network, it evaluates agent for MAX_EVAL_EPISODES
         # typcially MAX_EVAL_EPISODES = 1
@@ -230,7 +209,7 @@ class DDQN(DDQN):
             done = False
             while not done:
                 a = self.explorationStrategyEvalFn(self.nnOnline, s)
-                s, r, done = self.env.step(ACTIONS[a], render=self.render)
+                s, r, done = self.env.step(ACTIONS[a], render=False)
                 rs += r
                 if done:
                     finalEvalRewardsList.append(rs)
@@ -238,7 +217,7 @@ class DDQN(DDQN):
         return finalEvalRewardsList
 
 
-class DDQN(DDQN):
+class NFQ(NFQ):
     def save_weights(self, label):
         torch.save(self.nnOnline.state_dict(), label)
         print(f"weights-table saved to {label}")
@@ -261,7 +240,7 @@ def main():
     }
     ap = argparse.ArgumentParser()
     ap.add_argument("--obelix_py", type=str, required=True)
-    ap.add_argument("--out", type=str, default="weights_Ddqn.pth")
+    ap.add_argument("--out", type=str, default="weights_nfq.pth")
     ap.add_argument("--episodes", type=int, default=5000)
     ap.add_argument("--max_steps", type=int, default=1000)
     ap.add_argument("--difficulty", type=int, default=0)
@@ -271,19 +250,18 @@ def main():
     ap.add_argument("--arena_size", type=int, default=500)
 
     ap.add_argument("--gamma", type=float, default=0.99)
-    ap.add_argument("--initial_epsilon_value", type=float, default=1.0)
-    ap.add_argument("--final_epsilon_value", type=float, default=0.01)
-    ap.add_argument("--decay_rate", type=float, default=(0.2 / 1.0) ** (1 / 19999))
-    ap.add_argument("--decay_type", type=str, default="exponential")
+    ap.add_argument("--eps_start", type=float, default=1.0)
+    ap.add_argument("--eps_end", type=float, default=0.01)
+    ap.add_argument("--eps_decay_rate", type=float, default=0.99992)
+    ap.add_argument("--eps_decay_type", type=str, default="exponential")
     ap.add_argument("--seed", type=int, default=0)
 
+    ap.add_argument("--epochs", type=int, default=10)
     ap.add_argument("--bufferSize", type=int, default=50000)
     ap.add_argument("--batchSize", type=int, default=1024)
     ap.add_argument("--std_init", type=bool, default=True)
-    ap.add_argument("--warmup_time_steps", type=int, default=500)
+    ap.add_argument("--warmp_time_steps", type=int, default=500)
     ap.add_argument("--hdim", type=int, nargs="+", default=[64, 64])
-    ap.add_argument("--updateFrequency", type=int, default=15)
-    ap.add_argument("--render", type=bool, default=False)
 
     ap.add_argument(
         "--explorationStrategyTrainFn",
@@ -310,10 +288,11 @@ def main():
         difficulty=args.difficulty,
         box_speed=args.box_speed,
     )
-    agent = DDQN(
+    agent = NFQ(
         env,
         args.seed,
         args.gamma,
+        args.epochs,
         bufferSize=args.bufferSize,
         batchSize=args.batchSize,
         optimizerFn=args.optimizerFn,
@@ -322,17 +301,8 @@ def main():
         MAX_EVAL_EPISODES=1,
         explorationStrategyTrainFn=args.explorationStrategyTrainFn,
         explorationStrategyEvalFn=args.explorationStrategyEvalFn,
-        updateFrequency=args.updateFrequency,
-        hdim=args.hdim,
-        std_init=args.std_init,
-        initial_epsilon_value=args.initial_epsilon_value,
-        final_epsilon_value=args.final_epsilon_value,
-        decay_type=args.decay_type,
-        decay_rate=args.decay_rate,
-        warmup_time_steps=args.warmup_time_steps,
-        render=args.render,
     )
-    trainRewardsList, finalEvalReward, totalSteps = agent.runDDQN()
+    trainRewardsList, finalEvalReward, totalSteps = agent.runNFQ()
 
     print(f"OBELIX Final Eval Reward: {finalEvalReward}")
 
